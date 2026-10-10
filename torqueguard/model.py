@@ -3,6 +3,7 @@
 from dataclasses import dataclass, asdict
 from enum import Enum
 import math
+from .signals import SignalEvent, Inputs, InputSchedule, normalize_events
 
 DT = 0.02
 MASS_KG = 800.0
@@ -39,6 +40,8 @@ class Scenario:
     engine_available: bool = True
     hold_s: float = 2.0
     duration_s: float = 6.0
+    sector: int = 0
+    events: tuple[SignalEvent, ...] = ()
 
     def __post_init__(self):
         ranges = {"initial_speed_kph": (0, 100), "soc": (0, 1), "grip": (0, 1),
@@ -55,9 +58,14 @@ class Scenario:
             raise ValueError("name must contain 1–80 characters")
         if self.duration_s < self.hold_s + 1:
             raise ValueError("duration_s must allow at least 1 second after hold_s")
+        if not math.isclose(self.duration_s / DT, round(self.duration_s / DT), abs_tol=1e-8, rel_tol=0):
+            raise ValueError("duration_s must align to the 0.02 s sample grid")
+        if type(self.sector) is not int or not 0 <= self.sector <= 99:
+            raise ValueError("sector must be an integer in [0, 99]")
+        object.__setattr__(self, "events", normalize_events(self.events, self.duration_s, DT))
 
     def to_dict(self):
-        return asdict(self)
+        return {**asdict(self), "events": [event.to_dict() for event in self.events]}
 
 
 PRESETS = {
@@ -67,6 +75,27 @@ PRESETS = {
     "depleted": Scenario(name="SOC reserve · ICE fallback", soc=0.10, initial_speed_kph=0),
     "brake_overlap": Scenario(name="Brake and throttle overlap", brake_overlap=True),
     "clutch_open": Scenario(name="Clutch disengaged", clutch_engaged=False),
+    "wet_sector_release": Scenario(name="Wet entry · sector release", wet=False, restricted_sector=False,
+        duration_s=8, events=(
+            SignalEvent(1, "Rain / restricted sector", wet=True, restricted_sector=True, sector=1),
+            SignalEvent(2, "Restart request", throttle=.85, brake=0),
+            SignalEvent(3, "Throttle lift", throttle=0),
+            SignalEvent(3.3, "Throttle reapplied", throttle=.85),
+            SignalEvent(4, "Sector exit releases restriction", sector=2, restricted_sector=False, deployment_limit_kw=350))),
+    "rain_onset": Scenario(name="Rain onset after dry restart", wet=False, restricted_sector=False,
+        grip=.8, events=(
+            SignalEvent(2.4, "Rain and wet grip", wet=True, grip=.35),
+            SignalEvent(3, "Enter restricted sector", sector=1, restricted_sector=True, deployment_limit_kw=250),
+            SignalEvent(4, "Throttle lift", throttle=0),
+            SignalEvent(4.2, "Throttle reapplied", throttle=.85))),
+    "clutch_sequence": Scenario(name="Clutch release · wet restriction", events=(
+            SignalEvent(2, "Restart with clutch open", clutch_engaged=False, throttle=.85, brake=0),
+            SignalEvent(2.6, "Clutch engagement", clutch_engaged=True),
+            SignalEvent(4, "Wet restriction removed", wet=False))),
+    "energy_boundary": Scenario(name="SOC reserve crossing · power cap change", initial_speed_kph=0,
+        soc=.10015, wet=False, grip=.8, hold_s=1, events=(
+            SignalEvent(2, "Electrical deployment disabled", deployment_limit_kw=0, sector=1),
+            SignalEvent(3, "Electrical cap restored", deployment_limit_kw=250, sector=2))),
 }
 
 
@@ -89,6 +118,12 @@ class Sample:
     recovery_power_kw: float
     deployment_limit_kw: float
     eligible: bool
+    wet: bool
+    restricted_sector: bool
+    sector: int
+    grip: float
+    clutch_engaged: bool
+    engine_available: bool
 
 
 class Controller:
@@ -98,7 +133,7 @@ class Controller:
         self.variant = variant
         self.state = State.COAST
 
-    def transition(self, s: Scenario, speed_kph: float, rpm: float, throttle: float, brake: float, soc: float):
+    def transition(self, s: Inputs, speed_kph: float, rpm: float, throttle: float, brake: float, soc: float):
         constrained = s.wet and s.restricted_sector
         demand = throttle > 0.05 and brake < 0.05 and s.clutch_engaged
         # Injected fault: the exit guard requires speed that blocked propulsion cannot produce.
@@ -122,10 +157,10 @@ class Controller:
         return self.state, reason
 
 
-def step(s: Scenario, controller: Controller, speed_mps: float, soc: float, t: float) -> Sample:
-    # Brake to standstill, wait for the concertina, then request propulsion.
-    throttle = s.throttle if t >= s.hold_s else 0.0
-    brake = 0.8 if t < s.hold_s or s.brake_overlap else 0.0
+def step(s: Scenario, controller: Controller, speed_mps: float, soc: float, t: float,
+         inputs: Inputs | None = None) -> Sample:
+    s = inputs if inputs is not None else InputSchedule(s).at(t)
+    throttle, brake = s.throttle, s.brake
     rpm = max(IDLE_RPM, speed_mps / WHEEL_RADIUS_M * GEAR_RATIO * 60 / (2 * math.pi)) if s.engine_available else 0.0
     state, reason = controller.transition(s, speed_mps * 3.6, rpm, throttle, brake, soc)
     omega = speed_mps / WHEEL_RADIUS_M
@@ -168,7 +203,8 @@ def step(s: Scenario, controller: Controller, speed_mps: float, soc: float, t: f
                 available_torque > 150.0 and (s.engine_available or (soc > SOC_RESERVE and s.deployment_limit_kw > 1.0)))
     return Sample(round(t, 4), speed_mps * 3.6, next_speed * 3.6, rpm, throttle, brake, soc, next_soc,
                   state.value, reason, wheel, ice, mgu, power_w / 1000, max(0.0, -power_w / 1000),
-                  s.deployment_limit_kw, eligible)
+                  s.deployment_limit_kw, eligible, s.wet, s.restricted_sector, s.sector,
+                  s.grip, s.clutch_engaged, s.engine_available)
 
 
 class Monitor:
@@ -191,7 +227,8 @@ class Monitor:
         for code, failed in checks.items():
             if failed and code not in self.findings:
                 self.findings[code] = {"code": code, "time_s": x.time_s, "state": x.state,
-                                       "reason": x.reason, "demand_duration_s": round(self.starvation_s, 4)}
+                                       "reason": x.reason, "sector": x.sector, "wet": x.wet,
+                                       "demand_duration_s": round(self.starvation_s, 4)}
 
 
 def simulate(s: Scenario, variant="faulty", retain_trace=True):
@@ -199,8 +236,9 @@ def simulate(s: Scenario, variant="faulty", retain_trace=True):
     speed, soc = s.initial_speed_kph / 3.6, s.soc
     trace, transitions, states, edges = [], [], set(), set()
     previous_state = State.COAST.value
+    schedule = InputSchedule(s)
     for i in range(round(s.duration_s / DT)):
-        x = step(s, controller, speed, soc, i * DT)
+        x = step(s, controller, speed, soc, i * DT, inputs=schedule.at(i * DT))
         monitor.observe(x)
         states.add(x.state)
         edges.add(f"{previous_state} → {x.state}")

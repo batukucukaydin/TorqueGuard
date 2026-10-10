@@ -38,7 +38,9 @@ class ApiTests(unittest.TestCase):
 
     def test_bad_payloads_have_stable_error_response(self):
         for path, data in (("/api/replay", {"soc":2}), ("/api/replay", []),
-                           ("/api/replay", {"soc":None}), ("/api/campaign", {"cases":10001})):
+                           ("/api/replay", {"soc":None}), ("/api/campaign", {"cases":10001}),
+                           ("/api/replay", {"events":[{"time_s":.01,"wet":True}]}),
+                           ("/api/campaign", {"profile":"unknown"})):
             with self.assertRaises(HTTPError) as caught:
                 self.post(path, data)
             self.assertEqual(caught.exception.code, 400)

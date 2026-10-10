@@ -418,7 +418,9 @@ input[type=range] {
   font:12px var(--mono);
   display:block;
   margin-top:10px;
-  white-space:nowrap
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis
 }
 .lower-grid {
   display:grid;
@@ -801,3 +803,22 @@ footer>span:first-child {
     scroll-behavior:auto
   }
 }
+
+.event-panel { margin-top: 26px; }
+.event-panel h2 { font-size: 22px; }
+.event-table-wrap { overflow-x: auto; padding: 20px 22px 0; }
+.event-table { width: 100%; border-collapse: collapse; min-width: 650px; }
+.event-table th { text-align: left; font: 9px var(--mono); color: var(--muted); padding: 0 8px 12px; }
+.event-table td { padding: 5px 8px; }
+.event-table input, .event-table select { width: 100%; margin: 0; padding: 10px; border: 1px solid var(--line); background: #101714; color: var(--text); font: 11px var(--mono); }
+.event-table td:first-child { width: 100px; }
+.event-table td:nth-child(4) { width: 110px; }
+.event-table td:last-child { width: 44px; }
+.remove-event { background: transparent; border: 1px solid var(--line); color: var(--red); padding: 7px 11px; font-size: 18px; }
+.event-actions { display: flex; flex-wrap: wrap; gap: 12px; padding: 22px; }
+.event-note, #event-empty { margin: 0 22px 20px; }
+.chart-event { stroke: #687f74; stroke-width: 1; stroke-dasharray: 2 5; }
+.state-panel #transitions { max-height: 240px; overflow-y: auto; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@media (max-width: 800px) { .event-panel h2 { font-size: 18px; } .event-panel .outline-tag { display: none; } }
+.signal-strip > div { min-width: 0; }

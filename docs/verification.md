@@ -34,3 +34,16 @@ Local HTTP dashboard tested with the in-app browser:
 ## Interpretation
 
 These checks validate implementation consistency within the documented model and sampled test envelope. They do not establish coverage of all continuous states, all temporal event orderings, actual ECU code, or full FIA regulatory compliance. Counterexample minimization, hardware-in-the-loop testing and actual multisector trajectories remain future work.
+
+## Temporal input extension — model 0.2.0
+
+The event-schedule extension passes **22 automated tests**, including the original checks and eight trajectory/event contract tests. New checks cover exact-tick application, persistent and atomic input updates, sector-release recovery, event-order sensitivity, throttle interruption, delayed clutch engagement, computed SOC reserve crossing, event serialization and seeded temporal witness reproduction. Invalid and off-grid events, unknown signals, duplicate or reversed timestamps and an off-grid horizon are rejected.
+
+| Profile | Seed | Trajectories | Scheduled events | Injected-fault failures | Corrected failures |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Temporal | 2026 | 100 | 400 | 12 | 0 |
+| Temporal | 2026 | 1,000 | 4,017 | 126 | 0 |
+
+The 1,000-case report observes 31 of the 32 five-boolean input combinations within this sampled envelope. This does not establish numeric, state-space or event-order completeness. Earlier results above remain associated with model 0.1.0 and its boundary profile.
+
+The temporal report has been replayed through the CLI and the browser counterexample action. A wet-sector preset produces a baseline violation before recovering at the 4.00 s sector exit. Editing its wet-on event to remain dry changes the baseline result to PASS. The corrected controller passes both sequences. The event editor's atomic grouping has been exercised through Apply timeline & compare.

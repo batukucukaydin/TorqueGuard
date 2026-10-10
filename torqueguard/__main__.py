@@ -20,6 +20,7 @@ def main():
     scan = sub.add_parser("campaign", help="Run reproducible sampled trajectory validation")
     scan.add_argument("--cases", type=int, default=100)
     scan.add_argument("--seed", type=int, default=2026)
+    scan.add_argument("--profile", choices=("boundary", "temporal"), default="boundary")
     scan.add_argument("--output", type=Path)
     scan.add_argument("--fail-on", choices=("faulty", "corrected", "none"), default="corrected")
     args = parser.parse_args()
@@ -45,7 +46,7 @@ def main():
                     writer.writeheader()
                     writer.writerows(rows)
         else:
-            result = campaign(args.seed, args.cases)
+            result = campaign(args.seed, args.cases, args.profile)
         serialized = json.dumps(result, indent=2, allow_nan=False)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)

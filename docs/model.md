@@ -20,7 +20,7 @@
 | Fault RPM threshold | <4,500 rpm | Synthetic, not an FIA disclosed threshold |
 | Response property | <100 Nm for ≥0.50 s | Demonstration requirement, not a certified hazard threshold |
 
-The [FIA 2026 refinements](https://api.fia.com/news/refinements-2026-fia-formula-1-regulations-agreed-all-stakeholders) describe 350 kW in key acceleration zones and 250 kW elsewhere; this model does not implement their complete track-dependent rules. A single fixed `restricted_sector` flag expresses one hypothesis. A grip coefficient is a deterministic plant envelope, not real tyre data or a claim about legal traction control.
+The [FIA 2026 refinements](https://api.fia.com/news/refinements-2026-fia-formula-1-regulations-agreed-all-stakeholders) describe 350 kW in key acceleration zones and 250 kW elsewhere; this model does not implement their complete track-dependent rules. The active `restricted_sector` flag and sector ID can change through scheduled external events. Sector IDs are labels; there is no position-derived track model. A grip coefficient is a deterministic plant envelope, not real tyre data or a claim about legal traction control.
 
 ## Equations
 
@@ -45,4 +45,12 @@ Detection occurs at the beginning of the 25th starving step (`t=2.48 s` for a `t
 
 The campaign enumerates seeded samples from a small boundary-biased parameter set and runs full trajectories. It does **not** enumerate all continuous states, all event orderings or all thresholds. Boolean condition counts have a denominator of 32 for five flags, but do not establish coverage of all their numeric combinations. Witnesses are first failures with the complete scenario and zero-based case index. There is no automated minimization in this MVP.
 
-The two controllers have independent plant feedback. This is a paired comparison of the same external driver schedule, not replaying identical measured speed and SOC through both controllers. Initial braking and wait duration are scripted. A future experiment should vary input order, sector transitions, dwell, clutch release and sample time, add mutation-based monitors and validate against recorded or HIL traces.
+The two controllers have independent plant feedback. This is a paired comparison of the same external driver schedule, not replaying identical measured speed and SOC through both controllers. The base braking and restart schedule can be overridden by timed external events. The temporal campaign varies sector release timing, throttle interruption and clutch engagement. Future experiments should expand event ordering, vary sample time, add mutation-based monitors and validate against recorded or HIL traces.
+
+## Timed external inputs
+
+`SignalEvent` changes one or more external inputs on the fixed 20 ms grid. Changes are applied before controller evaluation at that tick and persist until a later event overrides the same signal. Unspecified fields continue to follow the base scenario schedule. Events must be strictly ordered, earlier than the horizon and limited to 32 entries. The horizon also aligns to the sample grid so a valid event is never silently truncated. Equal-time changes are represented in one atomic event.
+
+Supported inputs: throttle, brake, wet mode, restricted sector, sector ID, electrical cap, grip, clutch engagement and ICE availability. Neither SOC nor vehicle speed can be assigned by an event: those values remain independently integrated state for each controller. An event can therefore change the controller's operating conditions without erasing the trajectory that led there.
+
+The `boundary` campaign retains the original seeded parameter sampling. The `temporal` profile overlays dry approach, wet restricted entry and varied restart/release sequences. Its observed boolean combinations include timed input snapshots (wet, restriction, brake active, clutch engaged and engine availability). The legacy boundary count uses the scenario brake-overlap flag; the two profiles should not be treated as identical coverage denominators beyond their five boolean dimensions.
